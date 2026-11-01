@@ -1,0 +1,34 @@
+name: build-meat
+on:
+  schedule:
+    - cron: "17 3,7,11,15,19 * * *"   # 5x a day (UTC)
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install requests
+      - run: python build_meat.py meat.new.json
+      - name: keep the last good file if this run found nothing
+        run: |
+          python - <<'EOF'
+          import json, os, shutil
+          new = json.load(open('meat.new.json'))
+          n = sum(len(c['items']) for c in new['chains'])
+          if n >= 30 or not os.path.exists('meat.json'):
+              shutil.move('meat.new.json', 'meat.json')
+          else:
+              print('only', n, 'items - keeping previous meat.json'); os.remove('meat.new.json')
+          EOF
+      - name: commit
+        run: |
+          git config user.name "hoskim-bot"
+          git config user.email "hoskim-bot@users.noreply.github.com"
+          git add meat.json
+          git diff --cached --quiet || (git commit -m "meat.json $(date -u +%Y-%m-%dT%H:%MZ)" && git push)
