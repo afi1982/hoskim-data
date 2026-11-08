@@ -2,6 +2,8 @@ name: ashdod-prices
 on:
   schedule:
     - cron: '20 2 * * *'
+    - cron: '35 3 * * *'
+    - cron: '15 9 * * *'
   workflow_dispatch: {}
 permissions:
   contents: write
@@ -16,7 +18,10 @@ jobs:
         with: { python-version: '3.12' }
       - run: pip install requests==2.32.3
       - name: build
-        run: timeout -k 10 3000 python prices/build_prices.py ashdod-prices.db --where github || true
+        run: |
+          # start from the last published bundle, so a chain whose portal is down today keeps yesterday's data (dated per branch)
+          curl -fsSL -o base.db.gz https://github.com/afi1982/hoskim-data/releases/download/prices-latest/ashdod-prices.db.gz && gunzip base.db.gz && mv base.db ashdod-prices.db || true
+          timeout -k 10 3000 python prices/build_prices.py ashdod-prices.db --where github || true
       - name: report
         run: |
           python - <<'EOF'
@@ -27,7 +32,7 @@ jobs:
           json.dump({'chains': ch, 'stores': st}, open('report.json', 'w'), ensure_ascii=False, indent=1)
           print(json.dumps(ch, ensure_ascii=False))
           EOF
-          gzip -9 -k ashdod-prices.db
+          rm -f ashdod-prices.db.gz; gzip -9 -k ashdod-prices.db
           ls -la
       - name: publish
         env: { GH_TOKEN: '${{ github.token }}' }
