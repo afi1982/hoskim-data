@@ -1,0 +1,36 @@
+name: ashdod-prices
+on:
+  schedule:
+    - cron: '20 2 * * *'
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency: { group: ashdod-prices, cancel-in-progress: false }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install requests==2.32.3
+      - name: build
+        run: timeout -k 10 3000 python prices/build_prices.py ashdod-prices.db --where github || true
+      - name: report
+        run: |
+          python - <<'EOF'
+          import sqlite3, json
+          db = sqlite3.connect('ashdod-prices.db')
+          ch = [dict(zip(['chain_id','chain','status','note','n_stores','n_items','seconds','built_at','built_where'], r)) for r in db.execute('select * from chains')]
+          st = [dict(zip(['chain_id','chain','store_id','name','city','address','price_file','promo_file','price_date','n_items'], r)) for r in db.execute('select * from stores')]
+          json.dump({'chains': ch, 'stores': st}, open('report.json', 'w'), ensure_ascii=False, indent=1)
+          print(json.dumps(ch, ensure_ascii=False))
+          EOF
+          gzip -9 -k ashdod-prices.db
+          ls -la
+      - name: publish
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release view prices-latest >/dev/null 2>&1 || gh release create prices-latest --title "Ashdod prices (latest)" --notes "Daily Ashdod-area supermarket prices from the chains' Price Transparency files. Overwritten daily."
+          gh release upload prices-latest ashdod-prices.db.gz report.json --clobber
