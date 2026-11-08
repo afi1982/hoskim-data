@@ -349,7 +349,7 @@ def main():
     db = sqlite3.connect(a.out); db.executescript(SCHEMA)
     want = set(filter(None, a.chains.split(',')))
     if a.only_failed:
-        ok = {r[0] for r in db.execute("SELECT chain_id FROM chains WHERE status='ok'")}
+        ok = {r[0] for r in db.execute("SELECT chain_id FROM chains WHERE status='ok' AND COALESCE(note,'') NOT LIKE 'kept data%'")}
         want = {c for c, _, _ in CHAINS if c not in ok} if not want else want - ok
     for cid, cname, mk in CHAINS:
         if want and cid not in want: continue
