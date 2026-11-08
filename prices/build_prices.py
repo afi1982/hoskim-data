@@ -6,7 +6,7 @@ import requests, re, gzip, io, zipfile, json, sys, time, sqlite3, os, argparse, 
 from xml.etree import ElementTree as ET
 requests.packages.urllib3.disable_warnings()
 UA = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'}
-NOW = dt.datetime.utcnow() + dt.timedelta(hours=2)
+NOW = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(hours=2)
 # Ashdod + ~10 km
 AREA_NAMES = ['אשדוד', 'גן יבנה', 'יבנה', 'ניצן', 'בני דרום', 'חצור אשדוד', 'חצור-אשדוד', 'באר גנים', 'שדה עוזיהו', 'גבעת וושינגטון',
               'כפר ורבורג', 'בית עזרא', 'ניר גלים', 'אמונים', 'עזריקם', 'שתולים', 'ASHDOD', 'Ashdod', 'YAVNE', 'Yavne']
@@ -353,18 +353,22 @@ def main():
     for cid, cname, mk in CHAINS:
         if want and cid not in want: continue
         t0 = time.time()
-        try:
-            st, note, ns, ni = run_chain(db, cid, cname, mk(), a.where)
-        except Exception as e:
-            st, note, ns, ni = 'error', (type(e).__name__ + ': ' + str(e))[:200], 0, 0
+        for attempt in (1, 2):
+            try:
+                st, note, ns, ni = run_chain(db, cid, cname, mk(), a.where)
+            except Exception as e:
+                st, note, ns, ni = 'error', (type(e).__name__ + ': ' + str(e))[:200], 0, 0
+            if st != 'error' or 'Timeout' in note or attempt == 2: break
+            time.sleep(8)
         prev = db.execute('SELECT status FROM chains WHERE chain_id=?', (cid,)).fetchone()
         if st != 'ok' and prev and prev[0] == 'ok':
+            db.execute("UPDATE chains SET note=? WHERE chain_id=?", (('kept data from the previous successful run; this run: %s %s' % (st, note))[:400], cid)); db.commit()
             print(cid, 'kept previous ok data;', st, note, file=sys.stderr); continue
         db.execute('INSERT OR REPLACE INTO chains VALUES (?,?,?,?,?,?,?,?,?)', (cid, cname, st, note, ns, ni, round(time.time() - t0, 1),
-                   dt.datetime.utcnow().strftime('%Y-%m-%dT%H:%MZ'), a.where))
+                   dt.datetime.now(dt.timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%dT%H:%MZ'), a.where))
         db.commit()
         print(cid, st, ns, ni, round(time.time() - t0, 1), note[:200], file=sys.stderr, flush=True)
-    db.execute("INSERT OR REPLACE INTO meta VALUES ('built_at', ?)", (dt.datetime.utcnow().strftime('%Y-%m-%dT%H:%MZ'),))
+    db.execute("INSERT OR REPLACE INTO meta VALUES ('built_at', ?)", (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%dT%H:%MZ'),))
     db.execute('CREATE INDEX IF NOT EXISTS ix_items_code ON items(code)')
     db.execute('CREATE INDEX IF NOT EXISTS ix_promos ON promos(chain_id, store_id, code)')
     db.commit(); db.execute('VACUUM'); db.close()
