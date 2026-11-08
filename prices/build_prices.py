@@ -105,16 +105,17 @@ class Shufersal:
     BASE = 'https://prices.shufersal.co.il'
     def __init__(self): self.s = requests.Session(); self.s.headers.update(UA)
     def links(self, cat, store=0):
-        out = []
-        for page in range(1, 4):
-            r = self.s.get(self.BASE + '/FileObject/UpdateCategory', params={'catID': cat, 'storeId': store, 'page': page}, timeout=60)
-            l = [x.replace('&amp;', '&') for x in re.findall(r'href="(https://pricesprodpublic[^"]+)"', r.text)]
-            out += l
-            if len(l) < 20: break
-        return out
+        # the portal answers slowly (~55 s per page, measured 2026-11-08); page 1 holds the newest files
+        for attempt in (1, 2, 3):
+            try:
+                r = self.s.get(self.BASE + '/FileObject/UpdateCategory', params={'catID': cat, 'storeId': store}, timeout=(30, 240))
+                return [x.replace('&amp;', '&') for x in re.findall(r'href="(https://pricesprodpublic[^"]+)"', r.text)]
+            except requests.RequestException:
+                if attempt == 3: raise
+                time.sleep(10)
     def stores(self):
         l = self.links(5)
-        return store_rows(parse_xml(self.s.get(l[0], timeout=90).content))
+        return store_rows(parse_xml(self.s.get(l[0], timeout=180).content))
     def latest(self, kind, store_id):
         cat = 2 if kind == 'PriceFull' else 4
         l = [x for x in self.links(cat, store_id) if kind.lower() in x.lower()]
